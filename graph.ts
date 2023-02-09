@@ -1,87 +1,7 @@
-interface MainProduct {
-    target_name: string,
-    target_values:{type: "input" | "value", name: string, value: number | string | null}[],
-    products_applied: Operations[],
-    output:{
-        [key: string]: number;
-    }
-}
 
-type Products = "seguro" | "location" | "sflevel" | "cupom" | "ampera" | "state_validation"
-
-interface Operations {
-    type: Products
-    main_product_type: MainProduct["target_name"]
-    target_calc:{
-        operator: "-" | "+" | "*" | "/"
-        target_element: string;
-    },
-    value:{
-        origin: "api" | "db" | "input"
-        operation: string | null,
-        options: Elements["optionals"]
-        value: number 
-    }
-}
-
-interface Elements {
-    type: Products
-    optionals: {
-        [key: string]: number;
-    }
-}
-
+import { financiamento, operations } from './data'
 function pricing(){
-
-    const element: Elements = {
-        type: "sflevel",
-        optionals: {
-            "SF5": 1,
-            "SF4": 2,
-            "SF3": 1,
-            "SF2": 2,
-            "": 0,
-        }
-    }
-
     
-
-    const sflevel: Operations = {
-        type: "sflevel",
-        main_product_type: "financiamento",
-        target_calc:{
-            operator: "+",
-            target_element: "taxa_cadastro",
-        },
-        value:{
-            origin: "api",
-            operation: null,
-            options: element.optionals,
-            value: 0
-        }
-    }
-
-    const financiamento: MainProduct = {
-        target_name: "financiamento",
-        target_values:[
-            {type: "input", name: "carencia", value: null},
-            {type: "input", name: "valor_do_projeto", value: null},
-            {type: "input", name: "comissao", value: null},
-            {type: "input", name: "entrada", value: null},
-            {type: "value", name: "taxa_cadastro", value: 2},
-            {type: "value", name: "taxa_juros", value: 2},
-            {type: "value", name: "parcelas", value: 12},
-            {type: "value", name: "titulo", value: "PRE_FIXADO"},
-        ],
-        output:{
-            taxa_cadastro: 0,
-            valor_do_projeto: 0,
-            taxa_juros: 0,
-        },
-        products_applied:[sflevel],
-    }
-
-
     let memory = new Map()
 
     function searchAndMemoized(name, data){
@@ -91,34 +11,96 @@ function pricing(){
         memory.set(name, data[name])
     }
 
-    function process(main = financiamento, data){
-        main.target_values.map((value) => {
-            if(value.type === "input"){
-                searchAndMemoized(value.name, data)
-            }
-            if(value.type === "value"){
-                memory.set(value.name, value.value)
-            }
+    function processElementValue(value, data){
+       
+        if(value.value.origin === "input"){
+            return data[value.value.value]
+        }
+    }
+
+    function processMathOperations(value, response){
+        if(value.target_calc.operator === "+"){
+            value.target_calc.target_element.map((target) => {
+                memory.set(target , (memory.get(target) + value.value.options[response]))
+            }) 
+        }
+        if(value.target_calc.operator === "-"){
+            value.target_calc.target_element.map((target) => {
+                memory.set(target , (memory.get(target) - value.value.options[response]))
+            }) 
+        }
+        if(value.target_calc.operator === "*"){
+            value.target_calc.target_element.map((target) => {
+                if(memory.get(target) === 0) throw new Error(`O valor de ${target} nao pode ser 0`)
+                memory.set(target , (memory.get(target) * value.value.options[response]))
+            }) 
+        }
+        if(value.target_calc.operator === "/"){
+            value.target_calc.target_element.map((target) => {
+                if(memory.get(target) === 0) throw new Error(`O valor de ${target} nao pode ser 0`)
+                memory.set(target , (memory.get(target) / value.value.options[response]))
+            }) 
+        }
+    }
+
+    function process(main, data, products){
+        main.input_values.map((value) => {
+            searchAndMemoized(value.name, data)
         })
 
-        main.products_applied.map((value) => {
-            if(value.target_calc.operator === "+"){
-                let response = "";
-                if(value.value.origin === "api"){
-                    response = ""
-                }
-                memory.set(value.target_calc.target_element , (memory.get(value.target_calc.target_element) + element.optionals[response]))
-            }
+        main.specify_values.values.map((value) => {
+            memory.set(value.name, value.value)
         })
 
+        const default_validations = operations.filter((operation) => {
+            return main.default_validations.includes(operation.id)
+        })
 
+        const products_applied = operations.filter((operation) => {
+            return products.includes(operation.id)
+        })
 
+        const sorted = default_validations.sort((a, b) =>{
+            if (a.target_calc.operator == "*" ||  a.target_calc.operator == "/" ) {
+                return -1;
+              }
+              return 0;
+        })
+        
+        products_applied.map((value) => {
+            const response = processElementValue(value, data)
+            return processMathOperations(value, response)
+        })
+
+        sorted.map((value) => {
+            const response = processElementValue(value, data)
+            return processMathOperations(value, response)
+        })
+
+        const output = new Map();
+        for(const index in main.output){
+            output.set(index, memory.get(index))
+        }
+
+        return output
 
     }
-    const data = { carencia: 10, valor_do_projeto: 1000, entrada: 10, comissao: 1 }
-    process(financiamento, data)
-    console.log(memory)
+    const data = { carencia: 10, valor_do_projeto: 1000, entrada: 10, comissao: 1, solfacilplus: "SF4", estado: "BA", risk: "BOM", cpf:"07409571551" ,valor_do_projeto_entrada: 990, parcelas: 12, seguro: "true", ampera: "true" }
 
+    function processEachProducts(){
+        const response = process(financiamento, data, financiamento.specify_values.products)
+        console.log(financiamento.specify_values.products, response)
+
+        const response_empty = process(financiamento, data, [])
+        console.log(financiamento.specify_values.products, response)
+
+        financiamento.specify_values.products.map((product) => {
+            const response = process(financiamento, data, [product])
+            console.log(product, response)
+        })
+    }
+    processEachProducts()
+   
 }
 
 pricing()

@@ -1,47 +1,7 @@
+"use strict";
+exports.__esModule = true;
+var data_1 = require("./data");
 function pricing() {
-    var element = {
-        type: "sflevel",
-        optionals: {
-            "SF5": 1,
-            "SF4": 2,
-            "SF3": 1,
-            "SF2": 2,
-            "": 0
-        }
-    };
-    var sflevel = {
-        type: "sflevel",
-        main_product_type: "financiamento",
-        target_calc: {
-            operator: "+",
-            target_element: "taxa_cadastro"
-        },
-        value: {
-            origin: "api",
-            operation: null,
-            options: element.optionals,
-            value: 0
-        }
-    };
-    var financiamento = {
-        target_name: "financiamento",
-        target_values: [
-            { type: "input", name: "carencia", value: null },
-            { type: "input", name: "valor_do_projeto", value: null },
-            { type: "input", name: "comissao", value: null },
-            { type: "input", name: "entrada", value: null },
-            { type: "value", name: "taxa_cadastro", value: 2 },
-            { type: "value", name: "taxa_juros", value: 2 },
-            { type: "value", name: "parcelas", value: 12 },
-            { type: "value", name: "titulo", value: "PRE_FIXADO" },
-        ],
-        output: {
-            taxa_cadastro: 0,
-            valor_do_projeto: 0,
-            taxa_juros: 0
-        },
-        products_applied: [sflevel]
-    };
     var memory = new Map();
     function searchAndMemoized(name, data) {
         if (!data[name]) {
@@ -49,28 +9,81 @@ function pricing() {
         }
         memory.set(name, data[name]);
     }
-    function process(main, data) {
-        if (main === void 0) { main = financiamento; }
-        main.target_values.map(function (value) {
-            if (value.type === "input") {
-                searchAndMemoized(value.name, data);
-            }
-            if (value.type === "value") {
-                memory.set(value.name, value.value);
-            }
+    function processElementValue(value, data) {
+        if (value.value.origin === "input") {
+            return data[value.value.value];
+        }
+    }
+    function processMathOperations(value, response) {
+        if (value.target_calc.operator === "+") {
+            value.target_calc.target_element.map(function (target) {
+                memory.set(target, (memory.get(target) + value.value.options[response]));
+            });
+        }
+        if (value.target_calc.operator === "-") {
+            value.target_calc.target_element.map(function (target) {
+                memory.set(target, (memory.get(target) - value.value.options[response]));
+            });
+        }
+        if (value.target_calc.operator === "*") {
+            value.target_calc.target_element.map(function (target) {
+                if (memory.get(target) === 0)
+                    throw new Error("O valor de ".concat(target, " nao pode ser 0"));
+                memory.set(target, (memory.get(target) * value.value.options[response]));
+            });
+        }
+        if (value.target_calc.operator === "/") {
+            value.target_calc.target_element.map(function (target) {
+                if (memory.get(target) === 0)
+                    throw new Error("O valor de ".concat(target, " nao pode ser 0"));
+                memory.set(target, (memory.get(target) / value.value.options[response]));
+            });
+        }
+    }
+    function process(main, data, products) {
+        main.input_values.map(function (value) {
+            searchAndMemoized(value.name, data);
         });
-        main.products_applied.map(function (value) {
-            if (value.target_calc.operator === "+") {
-                var response = "";
-                if (value.value.origin === "api") {
-                    response = "";
-                }
-                memory.set(value.target_calc.target_element, (memory.get(value.target_calc.target_element) + element.optionals[response]));
+        main.specify_values.values.map(function (value) {
+            memory.set(value.name, value.value);
+        });
+        var default_validations = data_1.operations.filter(function (operation) {
+            return main.default_validations.includes(operation.id);
+        });
+        var products_applied = data_1.operations.filter(function (operation) {
+            return products.includes(operation.id);
+        });
+        var sorted = default_validations.sort(function (a, b) {
+            if (a.target_calc.operator == "*" || a.target_calc.operator == "/") {
+                return -1;
             }
+            return 0;
+        });
+        products_applied.map(function (value) {
+            var response = processElementValue(value, data);
+            return processMathOperations(value, response);
+        });
+        sorted.map(function (value) {
+            var response = processElementValue(value, data);
+            return processMathOperations(value, response);
+        });
+        var output = new Map();
+        for (var index in main.output) {
+            output.set(index, memory.get(index));
+        }
+        return output;
+    }
+    var data = { carencia: 10, valor_do_projeto: 1000, entrada: 10, comissao: 1, solfacilplus: "SF4", estado: "BA", risk: "BOM", cpf: "07409571551", valor_do_projeto_entrada: 990, parcelas: 12, seguro: "true", ampera: "true" };
+    function processEachProducts() {
+        var response = process(data_1.financiamento, data, data_1.financiamento.specify_values.products);
+        console.log(data_1.financiamento.specify_values.products, response);
+        var response_empty = process(data_1.financiamento, data, []);
+        console.log(data_1.financiamento.specify_values.products, response);
+        data_1.financiamento.specify_values.products.map(function (product) {
+            var response = process(data_1.financiamento, data, [product]);
+            console.log(product, response);
         });
     }
-    var data = { carencia: 10, valor_do_projeto: 1000, entrada: 10, comissao: 1 };
-    process(financiamento, data);
-    console.log(memory);
+    processEachProducts();
 }
 pricing();
